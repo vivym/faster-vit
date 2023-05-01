@@ -1,0 +1,16 @@
+FROM nvcr.io/nvidia/pytorch:22.08-py3 as BASE
+
+ARG USER=user
+ARG UID=1000
+ARG GID=1000
+ARG PW=${USER}
+
+RUN useradd -m ${USER} --uid=${UID} -s /bin/bash && echo "${USER}:${PW}" | chpasswd && adduser ${USER} sudo
+
+RUN cp /root/.bashrc /home/${USER}/.bashrc && \
+    chown ${UID}:${GID} /home/${USER}/.bashrc
+
+RUN cp -R /root/.pip /home/${USER}/.pip && \
+    chown -R ${UID}:${GID} /home/${USER}/.pip
+
+USER ${UID}:${GID}
