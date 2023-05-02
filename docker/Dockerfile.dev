@@ -5,7 +5,15 @@ ARG UID=1000
 ARG GID=1000
 ARG PW=${USER}
 
+RUN --mount=type=cache,id=apt-dev,target=/var/cache/apt \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        sudo && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN useradd -m ${USER} --uid=${UID} -s /bin/bash && echo "${USER}:${PW}" | chpasswd && adduser ${USER} sudo
+
+RUN chown -R ${UID}:${GID} /opt/conda
 
 RUN cp /root/.bashrc /home/${USER}/.bashrc && \
     chown ${UID}:${GID} /home/${USER}/.bashrc

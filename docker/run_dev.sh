@@ -12,4 +12,4 @@ docker run \
     --ulimit stack=67108864 \
     -v ${PWD}:/workspace/faster-vit \
     --workdir /workspace/faster-vit \
-    nvcr.io/nvidia/pytorch:22.08-py3 bash
+    faster-vit-dev bash
