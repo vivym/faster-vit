@@ -91,6 +91,11 @@ def build_plugin_field_collection(config: ViTConfig, model_path: Path):
                     assert "self_attn.qkv" in key
                     qkv = f.get_tensor(key).astype(arr_type)
                     q, k, v = np.split(qkv, 3, axis=0)
+                    if qkv.ndim == 2:
+                        q, k, v = q.T, k.T, v.T
+                    q = np.ascontiguousarray(q)
+                    k = np.ascontiguousarray(k)
+                    v = np.ascontiguousarray(v)
                     suffix = key.split(".")[-1]
                     if suffix == "weight":
                         suffix = "kernel"
@@ -101,8 +106,11 @@ def build_plugin_field_collection(config: ViTConfig, model_path: Path):
             else:
                 raise RuntimeError(f"Unknown key: {key}")
 
-            print(key, "->", new_key)
-            value_holder[new_key] = f.get_tensor(key).astype(arr_type)
+            value = f.get_tensor(key).astype(arr_type)
+            if value.ndim == 2:
+                value = value.T
+            value = np.ascontiguousarray(value)
+            value_holder[new_key] = value
 
     collection = []
     for key, value in value_holder.items():
@@ -136,7 +144,6 @@ class ViTEngine:
             raise RuntimeError(f"Invalid model: {model_dir}")
 
         config = ViTConfig.parse_file(config_path)
-        print("config", config)
 
         if not TRT_PLUGIN_PATH.exists():
             raise FileNotFoundError(f"Could not find {TRT_PLUGIN_PATH}")
@@ -208,7 +215,6 @@ class ViTEngine:
             )
             context.set_binding_shape(0, input_shape)
             output_shape = tuple(context.get_binding_shape(1))
-            print(output_shape)
 
             # Copy input h2d
             d_inputs = [images]
@@ -240,12 +246,18 @@ class ViTEngine:
 
 def main():
     engine = ViTEngine.from_pretrained("./weights/blip2-vit-hf")
-    images = torch.randn(32, 3, 224, 224, device="cuda", dtype=torch.float16)
+    images = torch.rand(1, 3, 224, 224, device="cuda", dtype=torch.float16)
+    images = images.repeat(32, 1, 1, 1).contiguous()
     ft_output = engine.inference(images)
+    print("ft_output", ft_output.min(), ft_output.max())
 
-    from transformers import Blip2VisionModel
+    from transformers import Blip2VisionModel, Blip2VisionConfig
+    config: Blip2VisionConfig = Blip2VisionConfig.from_pretrained("./weights/blip2-vit-hf")
+    config.layer_norm_eps = 1e-6
     model = Blip2VisionModel.from_pretrained(
-        "./weights/blip2-vit-hf", torch_dtype=torch.float16
+        "./weights/blip2-vit-hf",
+        torch_dtype=torch.float16,
+        config=config,
     ).to("cuda")
     model.eval()
 
@@ -263,6 +275,7 @@ def main():
     print("hf time : ", (time.time() - start_time) / 100 * 1000.0, "ms")
 
     hf_output = hf_output.cpu().numpy()
+    print("hf_output", hf_output.min(), hf_output.max())
     diff = np.abs(ft_output - hf_output)
     print(diff.max(), diff.mean())
 
