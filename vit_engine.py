@@ -133,6 +133,10 @@ class ViTEngine:
         self.engine = engine
         self.value_holder = value_holder
 
+        self.head = torch.jit.load("...")
+        self.head.eval()
+        self.head.to("cuda")
+
     @classmethod
     def from_pretrained(cls, model_name_or_path: str):
         # TODO: Load model by name
@@ -199,7 +203,7 @@ class ViTEngine:
 
         return cls(config, engine, value_holder)
 
-    def inference(self, images: torch.Tensor):
+    def benchmark(self, images: torch.Tensor):
         images = images.to("cuda", non_blocking=True)
 
         with self.engine.create_execution_context() as context:
@@ -216,7 +220,6 @@ class ViTEngine:
             context.set_binding_shape(0, input_shape)
             output_shape = tuple(context.get_binding_shape(1))
 
-            # Copy input h2d
             d_inputs = [images]
             d_output = torch.empty(output_shape, dtype=torch.float32, device=images.device)
 
@@ -242,6 +245,34 @@ class ViTEngine:
             print("plugin time : ", (time.time() - op_end) / 100 * 1000.0, "ms")
 
         return d_output.cpu().numpy()
+
+    def inference(self):
+        images = images.to("cuda", non_blocking=True)
+
+        with self.engine.create_execution_context() as context:
+            context.active_optimization_profile = 0
+
+            stream = torch.cuda.Stream()
+
+            input_shape = (
+                self.config.max_batch_size,
+                self.config.num_channels,
+                self.config.image_size,
+                self.config.image_size,
+            )
+            context.set_binding_shape(0, input_shape)
+            output_shape = tuple(context.get_binding_shape(1))
+
+            d_inputs = [images]
+            d_output = torch.empty(output_shape, dtype=torch.float32, device=images.device)
+
+            context.execute_async_v2(
+                [d_inp.data_ptr() for d_inp in d_inputs] + [d_output.data_ptr()],
+                stream.cuda_stream,
+            )
+
+        logits = self.head(d_output[:, 0, :])
+        return logits.softmax(-1)
 
 
 def main():
